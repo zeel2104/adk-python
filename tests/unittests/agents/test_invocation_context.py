@@ -24,6 +24,7 @@ from google.adk.sessions.base_session_service import BaseSessionService
 from google.adk.sessions.session import Session
 from google.genai.types import Content
 from google.genai.types import FunctionCall
+from google.genai.types import FunctionResponse
 from google.genai.types import Part
 import pytest
 
@@ -208,6 +209,82 @@ class TestInvocationContextWithAppResumablity:
 
     assert not mock_invocation_context.should_pause_invocation(
         nonpausable_event
+    )
+
+  def test_has_unresolved_long_running_tool_calls_with_matching_response(self):
+    """Tests that matching function responses resolve the pause."""
+    invocation_context = self._create_test_invocation_context(
+        ResumabilityConfig(is_resumable=True)
+    )
+    function_call = FunctionCall(
+        id='tool_call_id_1',
+        name='long_running_function_call',
+        args={},
+    )
+    paused_event = Event(
+        invocation_id='inv_1',
+        author='agent',
+        content=testing_utils.ModelContent([Part(function_call=function_call)]),
+        long_running_tool_ids={function_call.id},
+    )
+    resolved_event = Event(
+        invocation_id='inv_1',
+        author='user',
+        content=Content(
+            role='user',
+            parts=[
+                Part(
+                    function_response=FunctionResponse(
+                        name='long_running_function_call',
+                        response={'result': 'done'},
+                        id=function_call.id,
+                    )
+                )
+            ],
+        ),
+    )
+
+    assert not invocation_context.has_unresolved_long_running_tool_calls(
+        [paused_event, resolved_event]
+    )
+
+  def test_has_unresolved_long_running_tool_calls_without_matching_response(
+      self,
+  ):
+    """Tests that unmatched long-running calls still pause the invocation."""
+    invocation_context = self._create_test_invocation_context(
+        ResumabilityConfig(is_resumable=True)
+    )
+    function_call = FunctionCall(
+        id='tool_call_id_1',
+        name='long_running_function_call',
+        args={},
+    )
+    paused_event = Event(
+        invocation_id='inv_1',
+        author='agent',
+        content=testing_utils.ModelContent([Part(function_call=function_call)]),
+        long_running_tool_ids={function_call.id},
+    )
+    unrelated_response_event = Event(
+        invocation_id='inv_1',
+        author='user',
+        content=Content(
+            role='user',
+            parts=[
+                Part(
+                    function_response=FunctionResponse(
+                        name='long_running_function_call',
+                        response={'result': 'done'},
+                        id='different_tool_call_id',
+                    )
+                )
+            ],
+        ),
+    )
+
+    assert invocation_context.has_unresolved_long_running_tool_calls(
+        [paused_event, unrelated_response_event]
     )
 
   def test_is_resumable_true(self):

@@ -396,6 +396,34 @@ class InvocationContext(BaseModel):
 
     return False
 
+  def has_unresolved_long_running_tool_calls(
+      self, events: list[Event]
+  ) -> bool:
+    """Returns whether any long-running tool call in events is unresolved."""
+    if not self.is_resumable or not events:
+      return False
+
+    function_response_ids = {
+        function_response.id
+        for event in events
+        for function_response in event.get_function_responses()
+        if function_response.id
+    }
+
+    for event in reversed(events):
+      if not self.should_pause_invocation(event):
+        continue
+
+      paused_function_call_ids = {
+          function_call.id
+          for function_call in event.get_function_calls()
+          if function_call.id in event.long_running_tool_ids
+      }
+      if paused_function_call_ids - function_response_ids:
+        return True
+
+    return False
+
   # TODO: Move this method from invocation_context to a dedicated module.
   def _find_matching_function_call(
       self, function_response_event: Event
